@@ -1,0 +1,3 @@
+*.pyc
+data/building_footprints.csv
+.DS_Store
