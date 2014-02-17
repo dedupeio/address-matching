@@ -21,6 +21,7 @@ import collections
 import logging
 import optparse
 from numpy import nan
+from cStringIO import StringIO
 import math
 import itertools
 import random
@@ -70,27 +71,101 @@ def preProcess(column):
     column = column.strip().strip('"').strip("'").lower().strip()
     return column
 
-
-def readData(filename):
+def merge_address_fields(filename, merge_address_fields=[]):
     """
     Read in our data from a CSV file and create a dictionary of records, 
     where the key is a unique record ID.
     """
 
-    data_d = {}
+    data_d = []
 
     with open(filename) as f:
         reader = csv.DictReader(f)
         for i, row in enumerate(reader):
             clean_row = dict([(k, preProcess(v)) for (k, v) in row.items()])
-            data_d[filename + str(i)] = dict(clean_row)
+            if len(merge_address_fields) > 1:
+                full_address = ''
+                for f in merge_address_fields:
+                    full_address += row[f] + ' '
+                clean_row['Address'] = full_address
 
-    return data_d
+            data_d.append(clean_row)
+
+    with open('merge_address_fields.csv', 'w') as f:
+        writer = csv.DictWriter(f, fieldnames=data_d[0].keys())
+        writer.writeheader()
+        writer.writerows(data_d)
+
+def readData(input_file, prefix=None):
+    """
+    Read in our data from a CSV file and create a dictionary of records, 
+    where the key is a unique record ID and each value is a 
+    [frozendict](http://code.activestate.com/recipes/414283-frozen-dictionaries/) 
+    (hashable dictionary) of the row fields.
+
+    **Currently, dedupe depends upon records' unique ids being integers
+    with no integers skipped. The smallest valued unique id must be 0 or
+    1. Expect this requirement will likely be relaxed in the future.**
+    """
+
+    data = {}
+    reader = csv.DictReader(StringIO(input_file))
+    for i, row in enumerate(reader):
+        clean_row = [(k, preProcess(v)) for (k, v) in row.items()]
+        if prefix :
+            row_id = (prefix, i)
+        else :
+            row_id = i
+        data[row_id] = dedupe.core.frozendict(clean_row)
+
+    return data
+
+def writeLinkedResults(clustered_pairs, input_1, input_2, output_file, inner_join = True) :
+    logging.info('saving unique results to: %s' % output_file)
+
+    matched_records = []
+    seen_1 = set()
+    seen_2 = set()
+
+    input_1 = [row for row in csv.reader(StringIO(input_1))]
+    row_header = input_1.pop(0)
+    length_1 = len(row_header)
+
+    input_2 = [row for row in csv.reader(StringIO(input_2))]
+    row_header_2 = input_2.pop(0)
+    length_2 = len(row_header_2)
+    row_header += row_header_2
+
+    for pair in clustered_pairs :
+        index_1 = pair[0][1]
+        index_2 = pair[1][1]
+
+        matched_records.append(input_1[index_1] + input_2[index_2])
+        seen_1.add(index_1)
+        seen_2.add(index_2)
+
+    writer = csv.writer(output_file)
+    writer.writerow(row_header)
+
+    for matches in matched_records :
+        writer.writerow(matches)
+   
+    if not inner_join :
+
+        for i, row in enumerate(input_1) :
+            if i not in seen_1 :
+                writer.writerow(row + [None]*length_2)
+
+        for i, row in enumerate(input_2) :
+            if i not in seen_2 :
+                writer.writerow([None]*length_1 + row)
 
     
 print 'importing data ...'
-canonical_addresses = readData('canonical_addresses.csv')
-messy_addresses = readData('csv_example_messy_input.csv')
+canonical_file = open('data/building_footprints.csv', 'rU').read()
+messy_file = open('data/csv_example_messy_input.csv', 'rU').read()
+canonical_addresses = readData(canonical_file, prefix='canonical')
+messy_addresses = readData(messy_file, prefix='messy')
 
 # ## Training
 
@@ -103,19 +178,20 @@ else:
     #
     # Notice how we are telling dedupe to use a custom field comparator
     # for the 'Zip' field. 
-    fields = {
-        'title': {'type': 'String'},
-        'description': {'type': 'String',
-                        'Has Missing' :True},
-        'price': {'type' : 'Custom',
-                  'comparator' : comparePrice,
-                  'Has Missing' : True}}
+    fields = { 'Address': {'type': 'String'} }
 
     # Create a new linker object and pass our data model to it.
     linker = dedupe.Gazetteer(fields)
     # To train dedupe, we feed it a random sample of records.
-    linker.sample(messy_addresses, canonical_addresses, 150000)
-    dedupe.consoleLabel(deduper)
+    linker.sample(canonical_addresses, messy_addresses, 1500000)
+
+    rand_int = random.randint(0, len(linker.data_sample))
+    exact_matches = [(pair[0], pair[0]) for pair in linker.data_sample[:10]]
+
+    linker.markPairs({'match': exact_matches,
+                      'distinct':[]})
+
+    dedupe.consoleLabel(linker)
     linker.train()
 
     # When finished, save our training away to disk
@@ -138,43 +214,19 @@ else:
 # If we had more data, we would not pass in all the blocked data into
 # this function but a representative sample.
 
-threshold = linker.threshold(messy_addresses, canonical_addresses, recall_weight=10)
+threshold = linker.threshold(canonical_addresses, messy_addresses, recall_weight=10)
 
 # `duplicateClusters` will return sets of record IDs that dedupe
 # believes are all referring to the same entity.
 
 print 'clustering...'
-clustered_dupes = linker.match(messy_addresses, canonical_addresses, threshold)
+clustered_dupes = linker.match(canonical_addresses, messy_addresses, threshold)
 
 print '# duplicate sets', len(clustered_dupes)
-
-# ## Writing Results
-
-# Write our original data back out to a CSV with a new column called 
-# 'Cluster ID' which indicates which records refer to each other.
-
-cluster_membership = collections.defaultdict(lambda : 'x')
-for (cluster_id, cluster) in enumerate(clustered_dupes):
-    for record_id in cluster:
-        cluster_membership[record_id] = cluster_id
-
-
-
+# write out our results
 with open(output_file, 'w') as f:
-    writer = csv.writer(f)
-
-    for fileno, filename in enumerate(('csv_example_messy_input.csv', 'canonical_addresses.csv')) :
-        row_id = 0
-        with open(filename) as f_input :
-            reader = csv.reader(f_input)
-
-            heading_row = reader.next()
-            heading_row.insert(0, 'source file')
-            heading_row.insert(0, 'Cluster ID')
-            writer.writerow(heading_row)
-            for row in reader:
-                cluster_id = cluster_membership[filename + str(row_id)]
-                row.insert(0, fileno)
-                row.insert(0, cluster_id)
-                writer.writerow(row)
-                row_id += 1
+    writeLinkedResults(clustered_dupes, 
+                   canonical_file,
+                   messy_file,
+                   f,
+                   inner_join=True)
