@@ -24,7 +24,7 @@ unzip data/building_footprints.csv.zip
 Then, set the path to your Gazetteer in `address_matching.py`
 
 ```python
-gazetteer_file = open('data/building_footprints.csv', 'rU').read()
+canonical_file = open('data/building_footprints.csv', 'rU').read()
 ```
 
 ## List addresses you want to match
