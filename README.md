@@ -18,7 +18,8 @@ If you already have dedupe installed, we recommend you make a new virtualenv and
 You will need a Gazetteer of all unique addresses in a given area. For this example, we used the [Building Footprints shapefile](https://data.cityofchicago.org/Buildings/Building-Footprints/qv97-3bvb) and extracted the table attributes from the DBF file using csvkit. This file is in the `data` folder and should be unzipped if you want to use it.
 
 ```bash
-unzip data/building_footprints.csv.zip
+cd data
+unzip building_footprints.csv.zip
 ```
 
 Then, set the path to your Gazetteer in `address_matching.py`
