@@ -4,7 +4,7 @@ address-matching
 Python script for matching a list of messy addresses against a gazetteer using dedupe. This also functions as a pseudo geocoder if your Gazetteer has lat/long information.
 
 ## Setup
-
+Here's how to get this script working - without having dedupe already installed.
 ```bash
 git clone git@github.com:datamade/address-matching.git
 cd address-matching
@@ -12,7 +12,7 @@ pip install "numpy>=1.6"
 pip install git+https://github.com/datamade/dedupe.git@gazetteer#egg=dedupe
 ```
 
-
+If you already have dedupe installed, we recommend you make a new virtualenv and run the commands above. The `pip install git+https://github.com/datamade/dedupe.git@gazetteer#egg=dedupe` will install the `gazetteer` branch of dedupe, and all of dedupe's dependencies, automatically.
 
 ## Gazetteer
 You will need a Gazetteer of all unique addresses in a given area. For this example, we used the [Building Footprints shapefile](https://data.cityofchicago.org/Buildings/Building-Footprints/qv97-3bvb) and extracted the table attributes from the DBF file using csvkit. This file is in the `data` folder and should be unzipped if you want to use it.
