@@ -17,16 +17,13 @@ For larger datasets, see our [mysql_example](http://open-city.github.com/dedupe/
 import os
 import csv
 import re
-import collections
 import logging
 import optparse
-from numpy import nan
 from cStringIO import StringIO
-import math
-import itertools
-import random
+from numpy import nan
 
 import dedupe
+import streetaddress
 
 # ## Logging
 
@@ -111,7 +108,23 @@ def readData(input_file, prefix=None):
     data = {}
     reader = csv.DictReader(StringIO(input_file))
     for i, row in enumerate(reader):
-        clean_row = [(k, preProcess(v)) for (k, v) in row.items()]
+        clean_row = dict((k, preProcess(v)) for (k, v) in row.items())
+
+        parsed_address = streetaddress.parse(clean_row['Address'] 
+                                             + ', chicago, il')
+        if parsed_address :
+            clean_row['Address Parsed'] = 1
+        else :
+            clean_row['Address Parsed'] = 0
+            parsed_address = {}
+
+        key_components = {'number' : '', 'prefix' : '', 
+                          'street' : '', 'type' : ''}
+
+        key_components.update(parsed_address)
+
+        clean_row.update(key_components)
+        
         if prefix :
             row_id = (prefix, i)
         else :
@@ -119,6 +132,7 @@ def readData(input_file, prefix=None):
         data[row_id] = dedupe.core.frozendict(clean_row)
 
     return data
+
 
 def writeLinkedResults(clustered_pairs, input_1, input_2, output_file, inner_join = True) :
     logging.info('saving unique results to: %s' % output_file)
@@ -160,10 +174,23 @@ def writeLinkedResults(clustered_pairs, input_1, input_2, output_file, inner_joi
             if i not in seen_2 :
                 writer.writerow([None]*length_1 + row)
 
+
+def allParsed(field_1, field_2) :
+    return field_1 * field_2
+
+def sameOrNot(field_1, field_2) :
+    if field_1 and field_2 :
+        if field_1 == field_2 :
+            return 1
+        else:
+            return 0
+    else :
+        return nan
+
     
 print 'importing data ...'
 canonical_file = open('data/building_footprints.csv', 'rU').read()
-messy_file = open('data/csv_example_messy_input.csv', 'rU').read()
+messy_file = open('data/messy_addresses.csv', 'rU').read()
 canonical_addresses = readData(canonical_file, prefix='canonical')
 messy_addresses = readData(messy_file, prefix='messy')
 
@@ -178,18 +205,44 @@ else:
     #
     # Notice how we are telling dedupe to use a custom field comparator
     # for the 'Zip' field. 
-    fields = { 'Address': {'type': 'String'} }
+    fields = { 'Address': {'type': 'String'},
+               'number' : {'type' : 'Custom', 
+                           'comparator' : sameOrNot},
+               'prefix' : {'type' : 'String', 
+                           'Has Missing' : True},
+               'street' : {'type': 'String'},
+               'type' : {'type' : 'Custom', 
+                         'comparator' : sameOrNot,
+                         'Has Missing' : True},
+
+               'Address Parsed' : {'type' : 'Custom', 
+                                   'comparator' : allParsed},
+               'address-parse' : {'type' : 'Interaction',
+                                  'Interaction Fields' : ['Address', 
+                                                          'Address Parsed']},
+               'number-parse' : {'type' : 'Interaction',
+                                  'Interaction Fields' : ['number', 
+                                                          'Address Parsed']},
+               'prefix-parse' : {'type' : 'Interaction',
+                                  'Interaction Fields' : ['prefix', 
+                                                          'Address Parsed']},
+               'street-parse' : {'type' : 'Interaction',
+                                  'Interaction Fields' : ['street', 
+                                                          'Address Parsed']},
+               'type-parse' : {'type' : 'Interaction',
+                                'Interaction Fields' : ['type', 
+                                                        'Address Parsed']}
+              }
 
     # Create a new linker object and pass our data model to it.
     linker = dedupe.Gazetteer(fields)
     # To train dedupe, we feed it a random sample of records.
-    linker.sample(canonical_addresses, messy_addresses, 1500000)
+    linker.sample(messy_addresses, canonical_addresses, 3000000)
 
-    rand_int = random.randint(0, len(linker.data_sample))
-    exact_matches = [(pair[0], pair[0]) for pair in linker.data_sample[:10]]
+    if os.path.exists(training_file):
+        print 'reading labeled examples from ', training_file
+        linker.readTraining(training_file)
 
-    linker.markPairs({'match': exact_matches,
-                      'distinct':[]})
 
     dedupe.consoleLabel(linker)
     linker.train()
@@ -214,19 +267,19 @@ else:
 # If we had more data, we would not pass in all the blocked data into
 # this function but a representative sample.
 
-threshold = linker.threshold(canonical_addresses, messy_addresses, recall_weight=10)
+threshold = linker.threshold(messy_addresses, canonical_addresses, recall_weight=10)
 
 # `duplicateClusters` will return sets of record IDs that dedupe
 # believes are all referring to the same entity.
 
 print 'clustering...'
-clustered_dupes = linker.match(canonical_addresses, messy_addresses, threshold)
+clustered_dupes = linker.match(messy_addresses, canonical_addresses, threshold)
 
 print '# duplicate sets', len(clustered_dupes)
 # write out our results
 with open(output_file, 'w') as f:
     writeLinkedResults(clustered_dupes, 
-                   canonical_file,
-                   messy_file,
-                   f,
-                   inner_join=True)
+                       messy_file,
+                       canonical_file,
+                       f,
+                       inner_join=True)
