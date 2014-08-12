@@ -41,7 +41,7 @@ messy_file = open('data/csv_example_messy_input.csv', 'rU').read()
 Once you have a Gazetteer and a messy input file, run `address_matching.py`
 
 ```bash
-python address_mathing.py
+python address_matching.py
 ```
 
 You will be prompted to label some training pairs for dedupe to do its thing. [More on this here](https://github.com/datamade/dedupe/blob/master/README.md#training).
