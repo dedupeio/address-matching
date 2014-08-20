@@ -89,15 +89,6 @@ def readData(input_file, prefix=None):
 def allParsed(field_1, field_2) :
     return field_1 * field_2
 
-def sameOrNot(field_1, field_2) :
-    if field_1 and field_2 :
-        if field_1 == field_2 :
-            return 1
-        else:
-            return 0
-    else :
-        return nan
-
 
 # ## Setup
 output_file = 'address_matching_output.csv'
@@ -166,10 +157,24 @@ else:
 
     linker.cleanupTraining()
 
+#import pdb
+#pdb.set_trace()
+print 'indexing'
+linker.index(canonical_addresses)
+
+clustered_dupes = []
 
 print 'clustering...'
-clustered_dupes = linker.match(messy_addresses, canonical_addresses, 
-                               0.0)
+for i, (k, v) in enumerate(messy_addresses.iteritems()) :
+    print i
+    results = linker.search({k : v})
+    if results :
+        clustered_dupes.append(results)
+
+print clustered_dupes
+
+#clustered_dupes = linker.match(messy_addresses, canonical_addresses, 
+#                               0.0)
 
 print '# duplicate sets', len(clustered_dupes)
 
