@@ -171,8 +171,6 @@ for i, (k, v) in enumerate(messy_addresses.iteritems()) :
     if results :
         clustered_dupes.append(results)
 
-print clustered_dupes
-
 #clustered_dupes = linker.match(messy_addresses, canonical_addresses, 
 #                               0.0)
 
