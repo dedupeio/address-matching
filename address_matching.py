@@ -40,7 +40,6 @@ def preProcess(column):
     and Regex. Things like casing, extra spaces, quotes and new lines can be ignored.
     """
 
-    column = dedupe.asciiDammit(column)
     column = re.sub('\n', ' ', column)
     column = re.sub('-', '', column)
     column = re.sub('/', ' ', column)
