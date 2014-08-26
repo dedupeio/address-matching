@@ -16,6 +16,7 @@ from numpy import nan
 
 import dedupe
 import streetaddress
+import unidecode
 
 # ## Logging
 
@@ -39,7 +40,7 @@ def preProcess(column):
     Do a little bit of data cleaning with the help of [AsciiDammit](https://github.com/tnajdek/ASCII--Dammit) 
     and Regex. Things like casing, extra spaces, quotes and new lines can be ignored.
     """
-
+    column = unidecode.unidecode(column)
     column = re.sub('\n', ' ', column)
     column = re.sub('-', '', column)
     column = re.sub('/', ' ', column)
@@ -81,9 +82,10 @@ def readData(input_file, prefix=None):
 
             data[input_file + str(i)] = clean_row
 
+            #if i > 100000 :
+            #    break
 
     return data
-
 
 # These are custom comparison functions we'll use in our datamodel
 def allParsed(field_1, field_2) :
@@ -106,7 +108,7 @@ messy_addresses = readData(messy_file)
 if os.path.exists(settings_file):
     print 'reading from', settings_file
     with open(settings_file) as sf :
-        linker = dedupe.StaticGazetteer(sf)
+        linker = dedupe.StaticGazetteer(sf, num_cores=2)
 
 else:
     # Define the fields dedupe will pay attention to
@@ -124,6 +126,7 @@ else:
                {'field' : 'type', 'type' : 'Exact',
                 'has missing' : True},
                {'field' : 'Address Parsed', 'type' : 'Custom', 
+                'variable name' : 'Address Parsed', 
                 'comparator' : allParsed},
                {'type' : 'Interaction',
                 'interaction variables' : ['Address_String', 'Address Parsed']},
@@ -132,7 +135,7 @@ else:
               ]
 
     # Create a new linker object and pass our data model to it.
-    linker = dedupe.Gazetteer(fields)
+    linker = dedupe.Gazetteer(fields, num_cores=2)
     # To train dedupe, we feed it a random sample of records.
     linker.sample(messy_addresses, canonical_addresses, 3000000)
 
@@ -165,9 +168,9 @@ clustered_dupes = []
 print 'clustering...'
 for i, (k, v) in enumerate(messy_addresses.iteritems()) :
    print i
-   results = linker.search({k : v})
+   results = linker.match({k : v}, 0, 1)
    if results :
-       clustered_dupes.append(results)
+       clustered_dupes.append(results[0])
 
 #clustered_dupes = linker.match(messy_addresses, 0.0)
 
