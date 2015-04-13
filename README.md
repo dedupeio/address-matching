@@ -9,33 +9,15 @@ Here's how to get this script working - without having dedupe already installed.
 git clone git@github.com:datamade/address-matching.git
 cd address-matching
 pip install "numpy>=1.6"
-pip install git+https://github.com/datamade/dedupe.git@gazetteer#egg=dedupe
+pip install -r requirements.txt
 ```
-
-If you already have dedupe installed, we recommend you make a new virtualenv and run the commands above. The `pip install git+https://github.com/datamade/dedupe.git@gazetteer#egg=dedupe` will install the `gazetteer` branch of dedupe, and all of dedupe's dependencies, automatically.
 
 ## Gazetteer
-You will need a Gazetteer of all unique addresses in a given area. For this example, we used the [Building Footprints shapefile](https://data.cityofchicago.org/Buildings/Building-Footprints/qv97-3bvb) and extracted the table attributes from the DBF file using csvkit. This file is in the `data` folder and should be unzipped if you want to use it.
+You will need a Gazetteer of all unique addresses in a given area. For this example, we used the [Cook County Address Point shapefile](https://datacatalog.cookcountyil.gov/GIS-Maps/ccgisdata-Address-Point-Chicago/jev2-4wjs).
 
-```bash
-cd data
-unzip building_footprints.csv.zip
-```
-
-Then, set the path to your Gazetteer in `address_matching.py`
-
-```python
-canonical_file = open('data/building_footprints.csv', 'rU').read()
-```
 
 ## List addresses you want to match
 This program takes a list of addresses and matches them to individual records in the Gazetteer. For this example, we are using a messy list of early childhood education locations in Chicago. This file can have multiple entries referring to the same place. 
-
-Then, set the path to your messy list of addresses in `address_matching.py`
-
-```python
-messy_file = open('data/csv_example_messy_input.csv', 'rU').read()
-```
 
 ## Usage
 Once you have a Gazetteer and a messy input file, run `address_matching.py`
