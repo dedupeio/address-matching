@@ -33,55 +33,22 @@ if opts.verbose == 1:
     log_level = logging.INFO
 elif opts.verbose >= 2:
     log_level = logging.DEBUG
-logging.basicConfig(level=log_level)
-
-def preProcess(column):
-    """
-    Do a little bit of data cleaning with the help of [AsciiDammit](https://github.com/tnajdek/ASCII--Dammit) 
-    and Regex. Things like casing, extra spaces, quotes and new lines can be ignored.
-    """
-    column = unidecode.unidecode(column)
-    column = re.sub('\n', ' ', column)
-    column = re.sub('-', '', column)
-    column = re.sub('/', ' ', column)
-    column = re.sub("'", '', column)
-    column = re.sub(",", '', column)
-    column = re.sub(":", ' ', column)
-    column = re.sub('  +', ' ', column)
-    column = column.strip().strip('"').strip("'").lower().strip()
-    return column
-
-def cleanRow(row) :
-    return dict((k, preProcess(v)) for (k, v) in row.items())
-
-def parseAddress(row) :
-    clean_row = {}
-
-    parsed_address = usaddress.parse(unidecode.unidecode(row['Address']))
-
-    components = {}
-    for token, label in parsed_address :
-        components.setdefault(label, []).append(token.lower())
-
-    for label in ('AddressNumber',
-                  'StreetNamePreDirectional',
-                  'StreetName',
-                  'StreetNamePostType') :
-        clean_row[label] = ' '.join(components.get(label, ''))
-
-    if all([v == '' for v in clean_row.values()]) :
-        print clean_row, row
-        clean_row = None
-
-    else :
-        clean_row['Address'] = row['Address']
-    
-    return clean_row
+logging.getLogger().setLevel(log_level)
 
 
+def unicode_csv_reader(unicode_csv_data, dialect=csv.excel, **kwargs):
+    # csv.py doesn't do Unicode; encode temporarily as UTF-8:
+    csv_reader = csv.DictReader(utf_8_encoder(unicode_csv_data),
+                                dialect=dialect, **kwargs)
+    for row in csv_reader:
+        # decode UTF-8 back to Unicode, cell by cell:
+        yield {k : unicode(v, 'utf-8') for k, v in row.items()}
 
+def utf_8_encoder(unicode_csv_data):
+    for line in unicode_csv_data:
+        yield line.decode('utf-8').encode('utf-8')
 
-def readData(input_file, processor):
+def readData(input_file):
     """
     The data we'll be matching against are address strings. We'll
     use the python-streetaddress library to attempt to parse the 
@@ -90,27 +57,25 @@ def readData(input_file, processor):
 
     data = {}
     with open(input_file) as f:
-        reader = csv.DictReader(f)
+        reader = unicode_csv_reader(f)
         for i, row in enumerate(reader):
-            clean_row = processor(row)
-            if clean_row :
-                data[input_file + str(i)] = clean_row
+            data[input_file + unicode(i)] = row
 
     return data
-
 
 
 # ## Setup
 output_file = 'address_matching_output.csv'
 settings_file = 'address_matching_learned_settings'
 training_file = 'address_matching_training.json'
-canonical_file = 'data/building_footprints.csv'
+canonical_file = 'data/chicago_addresses.csv'
 messy_file = 'data/messy_addresses.csv'
 
     
 print 'importing data ...'
-messy_addresses = readData(messy_file, parseAddress)
-canonical_addresses = readData(canonical_file, cleanRow)
+messy_addresses = readData(messy_file)
+
+canonical_addresses = readData(canonical_file)
 
 # ## Training
 if os.path.exists(settings_file):
@@ -120,22 +85,12 @@ if os.path.exists(settings_file):
 
 else:
     # Define the fields dedupe will pay attention to
-    #
-    # Notice how we are telling dedupe to use a custom field comparator
-    # for the 'Zip' field. 
-    fields = [ 
-               {'field' : 'AddressNumber', 'type' : 'ShortString'}, 
-               {'field' : 'StreetNamePreDirectional', 'type' : 'ShortString',
-                'has missing' : True},
-               {'field' : 'StreetName', 'type': 'String'},
-               {'field' : 'StreetNamePostType', 'type' : 'ShortString',
-                'has missing' : True},
-              ]
+    fields = [{'field' : 'Address', 'type' : 'Address'}]
 
     # Create a new linker object and pass our data model to it.
     linker = dedupe.Gazetteer(fields, num_cores=2)
     # To train dedupe, we feed it a random sample of records.
-    linker.sample(messy_addresses, canonical_addresses, 3000000)
+    linker.sample(messy_addresses, canonical_addresses, 30000)
 
     if os.path.exists(training_file):
         print 'reading labeled examples from ', training_file
@@ -164,14 +119,6 @@ linker.index(canonical_addresses)
 clustered_dupes = []
 
 print 'clustering...'
-#for i, (k, v) in enumerate(messy_addresses.iteritems()) :
-#   print i
-#   results = linker.match({k : v}, 0, 1)
-#   if results :
-#       clustered_dupes.append(results[0])
-
-#import pdb
-#pdb.set_trace()
 clustered_dupes = linker.match(messy_addresses, 0.0)
 
 print '# duplicate sets', len(clustered_dupes)
@@ -191,11 +138,8 @@ with open(output_file, 'w') as f:
         row = [record['Address'], '', '', '', '']
         if record_id in canonical_lookup :
             canonical_id, score = canonical_lookup[record_id]
-            row[1] = ' '.join([canonical_addresses[canonical_id]['AddressNumber'],
-                               canonical_addresses[canonical_id]['StreetNamePreDirectional'],
-                               canonical_addresses[canonical_id]['StreetName'],
-                               canonical_addresses[canonical_id]['StreetNamePostType']])
+            row[1] = canonical_addresses[canonical_id]['Address']
             row[2] = score
-            row[3] = canonical_addresses[canonical_id]['x_coord']
-            row[4] = canonical_addresses[canonical_id]['y_coord']
+            row[3] = canonical_addresses[canonical_id]['LONGITUDE']
+            row[4] = canonical_addresses[canonical_id]['LATITUDE']
         writer.writerow(row)
