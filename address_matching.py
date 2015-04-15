@@ -12,11 +12,13 @@ import csv
 import re
 import logging
 import optparse
-from numpy import nan
+import itertools
+
+import psycopg2
+import psycopg2.extras
 
 import dedupe
-import unidecode
-import usaddress
+
 
 # ## Logging
 
@@ -35,6 +37,67 @@ elif opts.verbose >= 2:
     log_level = logging.DEBUG
 logging.getLogger().setLevel(log_level)
 
+class Database(object) :
+    def __init__(self, *args, **kwargs) :
+        self.con = psycopg2.connect("dbname=address",
+                                    cursor_factory=psycopg2.extras.RealDictCursor)
+
+        super(Database, self).__init__(*args, **kwargs)
+        
+
+
+    def unindex(self, data) : # pragma : no cover
+        pass
+
+    def _blockData(self, messy_data) :
+        c = self.con.cursor()
+
+        block_groups = itertools.groupby(self.blocker(messy_data.viewitems()), 
+                                         lambda x : x[1])
+
+        for i, (record_id, block_keys) in enumerate(block_groups) :
+            print i
+
+            A = [(record_id, messy_data[record_id], set())]
+
+
+            c.execute("SELECT DISTINCT record_id "
+                      "FROM blocking_map WHERE "
+                      "block_key IN %s", 
+                      (tuple(block_key for block_key, _ in block_keys),))
+
+            B = [(rec_id, self.indexed_data[rec_id], set())
+                 for rec_id, in c]
+
+            if B :
+                yield (A, B)
+
+
+class DatabaseGazetteer(Database, dedupe.Gazetteer) :
+    def train(self, ppc=.1, uncovered_dupes=1, index_predicates=False) : 
+        super(DatabaseGazetteer, self).train(ppc, 
+                                             uncovered_dupes, 
+                                             index_predicates)
+
+    def index(self, data) : # pragma : no cover
+        c = self.con.cursor()
+        c.execute("DROP TABLE IF EXISTS blocking_map")
+        c.execute("CREATE TABLE blocking_map "
+                  "(block_key VARCHAR(200), record_id VARCHAR(200))")
+
+        c.executemany("INSERT INTO blocking_map VALUES (%s, %s)",
+                      self.blocker(data.viewitems()))
+
+        self.con.commit()
+
+        self.indexed_data = data
+
+
+
+class StaticDatabaseGazetteer(Database, dedupe.StaticGazetteer) :
+
+    def index(self, data) : # pragma : no cover
+        self.indexed_data = data
 
 def unicode_csv_reader(unicode_csv_data, dialect=csv.excel, **kwargs):
     # csv.py doesn't do Unicode; encode temporarily as UTF-8:
@@ -69,7 +132,7 @@ output_file = 'address_matching_output.csv'
 settings_file = 'address_matching_learned_settings'
 training_file = 'address_matching_training.json'
 canonical_file = 'data/chicago_addresses.csv'
-messy_file = 'data/messy_addresses.csv'
+messy_file = 'Annual_Taxpayer_Location_Address_List-Chicago-2014 (1).csv'
 
     
 print 'importing data ...'
@@ -81,14 +144,14 @@ canonical_addresses = readData(canonical_file)
 if os.path.exists(settings_file):
     print 'reading from', settings_file
     with open(settings_file) as sf :
-        linker = dedupe.StaticGazetteer(sf, num_cores=2)
+        linker = StaticDatabaseGazetteer(sf, num_cores=2)
 
 else:
     # Define the fields dedupe will pay attention to
     fields = [{'field' : 'Address', 'type' : 'Address'}]
 
     # Create a new linker object and pass our data model to it.
-    linker = dedupe.Gazetteer(fields, num_cores=2)
+    linker = DatabaseGazetteer(fields, num_cores=2)
     # To train dedupe, we feed it a random sample of records.
     linker.sample(messy_addresses, canonical_addresses, 30000)
 
@@ -129,17 +192,18 @@ for n_results in clustered_dupes :
     (source_id, target_id), score = n_results[0]
     canonical_lookup[source_id] = (target_id, score)
 
-with open(output_file, 'w') as f:
+with open(output_file, 'wb') as f:
     writer = csv.writer(f)
-    writer.writerow(['Messy Address', 'Canonical Address', 
-                     'Score', 'x_coord', 'y_coord'])
+    header = messy_addresses.values()[0].keys()
+    writer.writerow(header + ['Canonical Address', 'Score', 
+                              'Longitude', 'Latitude'])
 
     for record_id, record in messy_addresses.items() :
-        row = [record['Address'], '', '', '', '']
+        row = record.values() 
         if record_id in canonical_lookup :
             canonical_id, score = canonical_lookup[record_id]
-            row[1] = canonical_addresses[canonical_id]['Address']
-            row[2] = score
-            row[3] = canonical_addresses[canonical_id]['LONGITUDE']
-            row[4] = canonical_addresses[canonical_id]['LATITUDE']
+            row += [canonical_addresses[canonical_id].get('Address', None),
+                    score, 
+                    canonical_addresses[canonical_id].get('LONGITUDE', None),
+                    canonical_addresses[canonical_id].get('LATITUDE', None)]
         writer.writerow(row)
