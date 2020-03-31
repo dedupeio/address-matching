@@ -3,6 +3,8 @@ address-matching
 
 Python script for matching a list of messy addresses against a gazetteer using dedupe. This also functions as a pseudo geocoder if your Gazetteer has lat/long information.
 
+Part of the [Dedupe.io](https://dedupe.io/) cloud service and open source toolset for de-duplicating and finding fuzzy matches in your data.
+
 ## Setup
 Here's how to get this script working - without having dedupe already installed.
 ```bash
